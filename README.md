@@ -18,6 +18,8 @@ Built on the free [TVmaze API](https://www.tvmaze.com/api) (no API key needed).
   Saved in your browser only, with no account.
 - **Following**: star a series to list it on the start page (click the title to get there) with
   its next episode and a countdown. Saved in your browser only.
+- **Popular today** on the start page: a row of the most popular series airing today. TVmaze
+  has no view counts, so this ranks by its popularity score.
 - **Hide spoilers**: blurs stills and summaries of episodes you have not watched yet.
 - **Main cast** with photos and character names. Click an actor to see every other series they
   appear in, with the roles they play.
@@ -80,6 +82,8 @@ Results are cached for 24 hours in a `.tvmaze_cache` folder (ignored by git).
 - Only episodes with an air date of today or earlier are listed.
 - The address changes to `#show=<id>&season=<n>` so a series and season can be bookmarked or shared.
 - A cast member opens `#person=<id>`, which loads `GET /people/<id>` and `GET /people/<id>/castcredits?embed[]=show&embed[]=character`.
+- "Popular today" merges `GET /schedule?country=US&date=<today>` and `GET /schedule/web?date=<today>`,
+  drops talk shows, news and sports, and sorts by each show's `weight`.
 - The start page loads `GET /shows/<id>?embed=nextepisode` for each followed series, one after the other.
 - Watched episodes, followed series, the sort order and the spoiler setting are kept in the browser's `localStorage`.
   They stay on that device and browser.
