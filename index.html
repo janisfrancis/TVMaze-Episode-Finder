@@ -26,7 +26,8 @@
     .rating .scale { font-weight: 400; color: #cbd5e1; font-size: 0.85rem; }
     .summary { margin: 0; }
     .summary.clamped { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-    .link-button { padding: 0; border: 0; background: none; color: #93c5fd; font: inherit; text-decoration: underline; }
+    .link-button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 0.9em; text-decoration: underline; }
+    .hero .link-button { color: #93c5fd; }
     .hero .links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; font-size: 0.9rem; }
     .hero .links a { color: #93c5fd; }
     .info { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px 24px; margin: 0 0 24px; padding: 16px; border-radius: 12px; background: var(--surface); }
@@ -81,11 +82,24 @@
     .empty { margin: 16px 0 0; color: var(--muted); }
     ol.episodes { list-style: none; margin: 12px 0 0; padding: 0; }
     ol.episodes li { padding: 8px 0; border-top: 1px solid var(--line); }
-    .ep-title { display: flex; gap: 12px; }
-    .ep-num { flex: none; width: 3.2em; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .ep-name { flex: 1; font-weight: 500; }
-    .ep-date { flex: none; color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
-    .ep-summary { margin: 2px 0 0 calc(3.2em + 12px); color: var(--muted); font-size: 0.9rem; }
+    .ep-toolbar { display: flex; justify-content: flex-end; margin-top: 16px; }
+    ol.episodes li.episode { display: flex; gap: 16px; padding: 14px 0; }
+    .still { flex: none; display: grid; place-items: center; width: 200px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: var(--surface); color: var(--muted); font-weight: 600; }
+    .still img { width: 100%; height: 100%; object-fit: cover; }
+    .ep-body { min-width: 0; flex: 1; }
+    .ep-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    .ep-num { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+    .ep-name { font-weight: 600; }
+    .badge { padding: 1px 8px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 0.75rem; font-weight: 600; }
+    .ep-meta { margin-top: 2px; color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+    .ep-rating .star { color: var(--star); }
+    .ep-summary { margin: 6px 0 0; color: var(--muted); font-size: 0.92rem; }
+    .ep-summary.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    @media (max-width: 600px) {
+      .still { width: 120px; }
+      .season-panel { padding: 12px; }
+      ol.episodes li.episode { gap: 12px; }
+    }
     footer { margin-top: 40px; color: var(--muted); font-size: 0.85rem; }
     footer a, .lead a { color: var(--accent); }
   </style>
@@ -267,6 +281,26 @@ function link(href, text) {
   return anchor;
 }
 
+// The paragraph starts clamped by CSS. Once it is on the page, offer "Read more"
+// only if the text is actually cut off.
+function addReadMore(paragraph) {
+  requestAnimationFrame(() => {
+    if (paragraph.scrollHeight <= paragraph.clientHeight + 1) {
+      paragraph.classList.remove("clamped");
+      return;
+    }
+    const more = el("button", "link-button", "Read more");
+    more.type = "button";
+    more.setAttribute("aria-expanded", "false");
+    more.addEventListener("click", () => {
+      const clamped = paragraph.classList.toggle("clamped");
+      more.textContent = clamped ? "Read more" : "Show less";
+      more.setAttribute("aria-expanded", String(!clamped));
+    });
+    paragraph.after(more);
+  });
+}
+
 function renderHero(show, images) {
   const hero = el("header", "hero");
   const backdropUrl = pickBackdrop(images);
@@ -313,20 +347,7 @@ function renderHero(show, images) {
   if (summaryText) {
     const summary = el("p", "summary clamped", summaryText);
     text.append(summary);
-    // Only offer "Read more" when the text is actually cut off (measured once the page shows it).
-    requestAnimationFrame(() => {
-      if (summary.scrollHeight <= summary.clientHeight + 1) {
-        summary.classList.remove("clamped");
-        return;
-      }
-      const more = el("button", "link-button", "Read more");
-      more.type = "button";
-      more.addEventListener("click", () => {
-        const clamped = summary.classList.toggle("clamped");
-        more.textContent = clamped ? "Read more" : "Show less";
-      });
-      summary.after(more);
-    });
+    addReadMore(summary);
   }
 
   const links = el("div", "links");
@@ -405,7 +426,7 @@ function renderShow(show, images, requestedSeason) {
     if (index < 0 || index >= allSeasons.length) return;
     cards.forEach((card, i) => card.setAttribute("aria-pressed", String(i === index)));
     if (scroll) cards[index].scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-    panel.replaceChildren(...renderSeasonPanel(allSeasons, index, today, selectSeason));
+    panel.replaceChildren(...renderSeasonPanel(show, allSeasons, index, today, selectSeason));
     history.replaceState(null, "", "#show=" + show.id + "&season=" + allSeasons[index].number);
   }
   seasonKeys = (delta) => {
@@ -477,7 +498,7 @@ function renderSeasonCard(show, season, today) {
   return card;
 }
 
-function renderSeasonPanel(allSeasons, index, today, selectSeason) {
+function renderSeasonPanel(show, allSeasons, index, today, selectSeason) {
   const season = allSeasons[index];
   const nav = el("div", "season-nav");
   const makeStep = (target, label) => {
@@ -507,25 +528,101 @@ function renderSeasonPanel(allSeasons, index, today, selectSeason) {
     parts.push(el("p", "empty", "No episodes of this season have aired yet."));
     return parts;
   }
+  const finaleId = finaleEpisodeId(show, season, index === allSeasons.length - 1, today);
+  const toolbar = el("div", "ep-toolbar");
+  const sortButton = el("button", "step");
+  sortButton.type = "button";
+  toolbar.append(sortButton);
   const list = el("ol", "episodes");
-  for (const episode of season.episodes) list.append(renderEpisode(episode));
-  parts.push(list);
+
+  const finaleLabel = show.ended && index === allSeasons.length - 1 ? "Series finale" : "Season finale";
+  const fillList = () => {
+    const ordered = newestFirst ? [...season.episodes].reverse() : season.episodes;
+    sortButton.textContent = newestFirst ? "↓ Newest first" : "↑ Oldest first";
+    sortButton.setAttribute("aria-label", "Sort order: " + (newestFirst ? "newest first" : "oldest first") + ". Click to change.");
+    list.replaceChildren(...ordered.map((episode) => renderEpisode(episode, episode.id === finaleId ? finaleLabel : "")));
+  };
+  sortButton.addEventListener("click", () => {
+    newestFirst = !newestFirst;
+    saveSetting("newestFirst", newestFirst);
+    fillList();
+  });
+  fillList();
+  parts.push(toolbar, list);
   return parts;
 }
 
-function renderEpisode(episode) {
-  const item = el("li");
-  const title = el("div", "ep-title");
-  title.append(
-    el("span", "ep-num", formatEpisodeNumber(episode.season, episode.number)),
-    el("span", "ep-name", episode.name),
-    el("span", "ep-date", episode.airdate)
-  );
-  item.append(title);
+// The last episode of a season counts as its finale once the season is complete:
+// all ordered episodes have aired, its end date has passed, or a later season exists.
+function finaleEpisodeId(show, season, isLastSeason, today) {
+  const last = season.episodes[season.episodes.length - 1];
+  if (!last || last.number === null) return null;
+  const info = season.info || {};
+  const complete = (info.episodeOrder && season.episodes.length >= info.episodeOrder)
+    || (info.endDate && info.endDate <= today)
+    || !isLastSeason
+    || Boolean(show.ended);
+  return complete ? last.id : null;
+}
+
+function renderEpisode(episode, label) {
+  const item = el("li", "episode");
+
+  // Landscape still from TVmaze, or a neutral tile with the episode number.
+  const still = el("div", "still");
+  if (episode.image && episode.image.medium) {
+    const img = el("img");
+    img.src = episode.image.medium;
+    img.alt = "";
+    img.loading = "lazy";
+    still.append(img);
+  } else {
+    still.append(el("span", "", episode.number === null ? "Special" : "E" + episode.number));
+  }
+
+  const body = el("div", "ep-body");
+  const top = el("div", "ep-top");
+  top.append(el("span", "ep-num", formatEpisodeNumber(episode.season, episode.number)), el("span", "ep-name", episode.name));
+  if (label) top.append(el("span", "badge", label));
+  body.append(top);
+
+  const meta = el("div", "ep-meta");
+  const metaParts = [formatDate(episode.airdate), episode.runtime ? episode.runtime + " min" : ""].filter(Boolean);
+  meta.append(metaParts.join(" · "));
+  if (episode.rating && episode.rating.average) {
+    meta.append(" · ");
+    const rating = el("span", "ep-rating");
+    rating.setAttribute("aria-label", "Rated " + episode.rating.average + " out of 10");
+    rating.append(el("span", "star", "★"), " " + episode.rating.average.toFixed(1));
+    meta.append(rating);
+  }
+  body.append(meta);
+
   const summaryText = plainText(episode.summary);
-  if (summaryText) item.append(el("p", "ep-summary", summaryText));
+  if (summaryText) {
+    const summary = el("p", "ep-summary clamped", summaryText);
+    body.append(summary);
+    addReadMore(summary);
+  }
+
+  item.append(still, body);
   return item;
 }
+
+// Small per-browser preferences. Storage can be unavailable (private mode), so never rely on it.
+function loadSetting(key, fallback) {
+  try {
+    const value = localStorage.getItem("episode-finder:" + key);
+    return value === null ? fallback : JSON.parse(value);
+  } catch (error) {
+    return fallback;
+  }
+}
+function saveSetting(key, value) {
+  try { localStorage.setItem("episode-finder:" + key, JSON.stringify(value)); } catch (error) { /* ignore */ }
+}
+
+let newestFirst = loadSetting("newestFirst", false);
 
 // Set while a show is displayed: moves the season selection by -1 or +1.
 let seasonKeys = null;
