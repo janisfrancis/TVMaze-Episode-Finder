@@ -5,10 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Episode Finder</title>
   <style>
-    :root { color-scheme: light dark; --accent: #2b6cb0; --muted: #6b7280; --line: rgba(128, 128, 128, 0.3); }
+    :root { color-scheme: light dark; --accent: #2b6cb0; --muted: #6b7280; --line: rgba(128, 128, 128, 0.3); --surface: rgba(128, 128, 128, 0.08); --star: #f5b301; }
     * { box-sizing: border-box; }
     body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+    img { max-width: 100%; }
+
+    /* Series header: backdrop, poster, title, facts, rating, summary */
+    .hero { position: relative; overflow: hidden; margin: 8px 0 20px; border-radius: 12px; background: #1f2937; color: #f9fafb; }
+    .hero .backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 20%; }
+    .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.85) 45%, rgba(15, 23, 42, 0.55) 100%); }
+    .hero-inner { position: relative; z-index: 1; display: flex; gap: 24px; padding: 24px; }
+    .hero .poster, .hero .noposter { flex: none; width: 180px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 8px; background: rgba(255, 255, 255, 0.1); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+    .hero-text { min-width: 0; flex: 1; }
+    .hero h2 { margin: 0; font-size: 1.9rem; line-height: 1.2; }
+    .hero h2 .years { font-weight: 400; color: #cbd5e1; }
+    .hero .facts { margin: 6px 0 12px; color: #cbd5e1; font-size: 0.95rem; }
+    .rating { display: inline-flex; align-items: baseline; gap: 4px; margin-bottom: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); font-weight: 600; }
+    .rating .star { color: var(--star); }
+    .rating .scale { font-weight: 400; color: #cbd5e1; font-size: 0.85rem; }
+    .summary { margin: 0; }
+    .summary.clamped { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+    .link-button { padding: 0; border: 0; background: none; color: #93c5fd; font: inherit; text-decoration: underline; }
+    .hero .links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; font-size: 0.9rem; }
+    .hero .links a { color: #93c5fd; }
+    .info { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px 24px; margin: 0 0 24px; padding: 16px; border-radius: 12px; background: var(--surface); }
+    .info dt { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .info dd { margin: 0; }
+    @media (max-width: 600px) {
+      .hero-inner { flex-direction: column; padding: 16px; gap: 16px; }
+      .hero .poster, .hero .noposter { width: 120px; }
+      .hero h2 { font-size: 1.5rem; }
+    }
     h1 { margin: 0 0 4px; font-size: 1.6rem; }
     .lead { margin: 0 0 20px; color: var(--muted); }
     form { display: flex; gap: 8px; }
@@ -179,14 +207,156 @@ function renderResults(matches) {
   }
 }
 
-function renderShow(show, episodes) {
+// "2022–" for a running show, "2007–2019" for an ended one, "2010" for a one-year show.
+function yearRange(show) {
+  if (!show.premiered) return "";
+  const start = show.premiered.slice(0, 4);
+  if (show.ended) {
+    const end = show.ended.slice(0, 4);
+    return end === start ? start : start + "–" + end;
+  }
+  return show.status === "Running" ? start + "–" : start;
+}
+
+// Network for TV shows, web channel (Netflix, Apple TV, ...) for streaming shows.
+function channelName(show) {
+  return (show.network && show.network.name) || (show.webChannel && show.webChannel.name) || "";
+}
+
+// Pick the backdrop: the main "background" image if there is one, else the first.
+// TVmaze only offers backgrounds at original size, so prefer the narrowest one that is still wide enough.
+function pickBackdrop(images) {
+  const backgrounds = (images || []).filter((image) => image.type === "background" && image.resolutions.original);
+  if (backgrounds.length === 0) return null;
+  const main = backgrounds.find((image) => image.main);
+  if (main) return main.resolutions.original.url;
+  const wideEnough = backgrounds
+    .map((image) => image.resolutions.original)
+    .filter((resolution) => resolution.width >= 1280)
+    .sort((a, b) => a.width - b.width);
+  return (wideEnough[0] || backgrounds[0].resolutions.original).url;
+}
+
+function link(href, text) {
+  const anchor = el("a", "", text);
+  anchor.href = href;
+  anchor.target = "_blank";
+  anchor.rel = "noopener";
+  return anchor;
+}
+
+function renderHero(show, images) {
+  const hero = el("header", "hero");
+  const backdropUrl = pickBackdrop(images);
+  if (backdropUrl) {
+    const backdrop = el("img", "backdrop");
+    backdrop.src = backdropUrl;
+    backdrop.alt = "";
+    hero.append(backdrop);
+  }
+
+  const inner = el("div", "hero-inner");
+  if (show.image && (show.image.medium || show.image.original)) {
+    const poster = el("img", "poster");
+    poster.src = show.image.medium || show.image.original;
+    poster.alt = "Poster of " + show.name;
+    inner.append(poster);
+  } else {
+    inner.append(el("div", "noposter"));
+  }
+
+  const text = el("div", "hero-text");
+  const title = el("h2", "", show.name + " ");
+  const years = yearRange(show);
+  if (years) title.append(el("span", "years", "(" + years + ")"));
+  text.append(title);
+
+  const runtime = show.runtime || show.averageRuntime;
+  const facts = [
+    (show.genres || []).join(", "),
+    show.status,
+    channelName(show),
+    runtime ? runtime + " min" : ""
+  ].filter(Boolean);
+  text.append(el("p", "facts", facts.join(" · ")));
+
+  if (show.rating && show.rating.average) {
+    const rating = el("div", "rating");
+    rating.setAttribute("aria-label", "Rated " + show.rating.average + " out of 10 on TVmaze");
+    rating.append(el("span", "star", "★"), show.rating.average.toFixed(1), el("span", "scale", "/ 10"));
+    text.append(rating);
+  }
+
+  const summaryText = plainText(show.summary);
+  if (summaryText) {
+    const summary = el("p", "summary clamped", summaryText);
+    text.append(summary);
+    // Only offer "Read more" when the text is actually cut off (measured once the page shows it).
+    requestAnimationFrame(() => {
+      if (summary.scrollHeight <= summary.clientHeight + 1) {
+        summary.classList.remove("clamped");
+        return;
+      }
+      const more = el("button", "link-button", "Read more");
+      more.type = "button";
+      more.addEventListener("click", () => {
+        const clamped = summary.classList.toggle("clamped");
+        more.textContent = clamped ? "Read more" : "Show less";
+      });
+      summary.after(more);
+    });
+  }
+
+  const links = el("div", "links");
+  if (show.url) links.append(link(show.url, "TVmaze page"));
+  if (show.externals && show.externals.imdb) links.append(link("https://www.imdb.com/title/" + show.externals.imdb + "/", "IMDb"));
+  if (show.officialSite) links.append(link(show.officialSite, "Official site"));
+  text.append(links);
+
+  inner.append(text);
+  hero.append(inner);
+  return hero;
+}
+
+function formatDate(isoDate) {
+  if (!isoDate) return "";
+  return new Date(isoDate + "T12:00:00").toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function renderInfo(show, seasons, airedCount) {
+  const rows = [
+    ["Premiered", formatDate(show.premiered)],
+    [show.ended ? "Ended" : "Status", show.ended ? formatDate(show.ended) : show.status],
+    ["Schedule", [(show.schedule.days || []).join(", "), show.schedule.time].filter(Boolean).join(" at ")],
+    ["Seasons", seasons.length ? String(seasons.length) : ""],
+    ["Episodes aired", String(airedCount)],
+    ["Type", show.type],
+    ["Language", show.language]
+  ];
+  const list = el("dl", "info");
+  for (const [label, value] of rows) {
+    if (!value) continue;
+    const item = el("div");
+    item.append(el("dt", "", label), el("dd", "", value));
+    list.append(item);
+  }
+  return list;
+}
+
+function renderShow(show, images) {
+  const embedded = show._embedded || {};
+  const episodes = embedded.episodes || [];
+  const seasons = embedded.seasons || [];
   const today = todayString();
   const aired = episodes.filter((episode) => isAired(episode, today));
   const container = document.getElementById("show");
   container.replaceChildren();
+  document.title = show.name + " – Episode Finder";
+
+  container.append(renderHero(show, images), renderInfo(show, seasons, aired.length));
 
   const head = el("div", "show-head");
-  head.append(el("h2", "", show.name + " – " + aired.length + " episodes aired"));
+  head.append(el("h2", "", "Episodes"));
   const toggles = el("div", "toggles");
   const expand = el("button", "", "Expand all");
   const collapse = el("button", "", "Collapse all");
@@ -235,6 +405,7 @@ function renderShow(show, episodes) {
 async function runSearch(query) {
   setStatus("Searching…");
   document.getElementById("show").hidden = true;
+  document.title = "Episode Finder";
   try {
     const matches = await getJson("/search/shows?q=" + encodeURIComponent(query));
     renderResults(matches.slice(0, 8));
@@ -249,11 +420,13 @@ async function loadShow(id) {
   setStatus("Loading episodes…");
   document.getElementById("results").replaceChildren();
   try {
-    const [show, episodes] = await Promise.all([
-      getJson("/shows/" + id),
-      getJson("/shows/" + id + "/episodes")
+    // One request returns the show with its seasons, episodes, cast and next episode.
+    // Images are a separate request and only decorate the header, so a failure there is ignored.
+    const [show, images] = await Promise.all([
+      getJson("/shows/" + id + "?embed[]=seasons&embed[]=episodes&embed[]=cast&embed[]=nextepisode&embed[]=previousepisode"),
+      getJson("/shows/" + id + "/images").catch(() => [])
     ]);
-    renderShow(show, episodes);
+    renderShow(show, images);
     setStatus("");
   } catch (error) {
     setStatus(error.message, true);
