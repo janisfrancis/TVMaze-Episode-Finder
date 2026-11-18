@@ -17,7 +17,8 @@ Built on the free [TVmaze API](https://www.tvmaze.com/api) (no API key needed).
 - **Watched tracking**: tick episodes or whole seasons. Progress shows on the season cards.
   Saved in your browser only, with no account.
 - **Hide spoilers**: blurs stills and summaries of episodes you have not watched yet.
-- **Main cast** with photos and character names.
+- **Main cast** with photos and character names. Click an actor to see every other series they
+  appear in, with the roles they play.
 
 This repository has two parts:
 
@@ -76,6 +77,7 @@ Results are cached for 24 hours in a `.tvmaze_cache` folder (ignored by git).
   plus `GET /shows/<id>/images` for the backdrop and `GET /shows/<id>/episodes?specials=1` for the specials.
 - Only episodes with an air date of today or earlier are listed.
 - The address changes to `#show=<id>&season=<n>` so a series and season can be bookmarked or shared.
+- A cast member opens `#person=<id>`, which loads `GET /people/<id>` and `GET /people/<id>/castcredits?embed[]=show&embed[]=character`.
 - Watched episodes, the sort order and the spoiler setting are kept in the browser's `localStorage`.
   They stay on that device and browser.
 - Images are loaded straight from TVmaze's image server, which TVmaze explicitly allows.

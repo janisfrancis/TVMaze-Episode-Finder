@@ -257,7 +257,7 @@ function renderResults(matches) {
   list.replaceChildren();
   document.getElementById("show").hidden = true;
 
-  for (const { show } of matches) {
+  for (const { show, role } of matches) {
     const button = el("button", "result");
     button.type = "button";
     if (show.image && show.image.medium) {
@@ -277,6 +277,7 @@ function renderResults(matches) {
     text.append(el("div", "meta", parts.join(" · ")));
     const extra = [(show.genres || []).join(", "), show.rating && show.rating.average ? "★ " + show.rating.average.toFixed(1) : ""].filter(Boolean);
     if (extra.length) text.append(el("div", "meta", extra.join(" · ")));
+    if (role) text.append(el("div", "meta", role));
     button.append(text);
 
     button.addEventListener("click", () => { location.hash = "show=" + show.id; });
@@ -575,8 +576,9 @@ function renderCast(cast) {
   const list = el("ul", "cast-strip");
   for (const { person, character, characters, voice } of people.values()) {
     const item = el("li");
-    const card = link(person.url, "");
-    card.className = "cast-card";
+    const card = el("a", "cast-card");
+    card.href = "#person=" + person.id;
+    card.title = "Other shows with " + person.name;
     const photo = (person.image && person.image.medium) || (character.image && character.image.medium);
     const thumb = el("div", "cast-photo");
     if (photo) {
@@ -956,10 +958,42 @@ async function loadShow(id, season) {
   }
 }
 
-// The address (#show=66&season=2) lets people bookmark or share a series and season.
+// Everything an actor appears in: one entry per show, newest first, with the roles played.
+async function loadPerson(id) {
+  setStatus("Loading…");
+  document.title = "Episode Finder";
+  try {
+    const [person, credits] = await Promise.all([
+      getJson("/people/" + id),
+      getJson("/people/" + id + "/castcredits?embed[]=show&embed[]=character")
+    ]);
+    const shows = new Map();
+    for (const credit of credits) {
+      const show = credit._embedded && credit._embedded.show;
+      if (!show) continue;
+      const role = (credit._embedded.character && credit._embedded.character.name) || "";
+      const entry = shows.get(show.id) || { show, roles: [] };
+      if (role && !entry.roles.includes(role)) entry.roles.push(role);
+      shows.set(show.id, entry);
+    }
+    const matches = [...shows.values()]
+      .sort((a, b) => (b.show.premiered || "").localeCompare(a.show.premiered || ""))
+      .map(({ show, roles }) => ({ show, role: roles.length ? "as " + roles.join(", ") : "" }));
+    renderResults(matches);
+    document.title = person.name + " – Episode Finder";
+    setStatus(matches.length ? "Series featuring " + person.name + ":" : "No series listed for " + person.name + ".");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+// The address (#show=66&season=2) lets people bookmark or share a series and season;
+// #person=1 shows the series an actor appears in.
 function loadFromHash() {
-  const match = location.hash.match(/^#show=(\d+)(?:&season=(\d+))?$/);
-  if (match) loadShow(match[1], match[2] === undefined ? null : Number(match[2]));
+  const show = location.hash.match(/^#show=(\d+)(?:&season=(\d+))?$/);
+  if (show) return loadShow(show[1], show[2] === undefined ? null : Number(show[2]));
+  const person = location.hash.match(/^#person=(\d+)$/);
+  if (person) loadPerson(person[1]);
 }
 
 document.getElementById("search-form").addEventListener("submit", (event) => {
