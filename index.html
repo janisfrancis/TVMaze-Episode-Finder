@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Episode Finder</title>
   <style>
-    :root { color-scheme: light dark; --accent: #2b6cb0; --muted: #6b7280; --line: rgba(128, 128, 128, 0.3); --surface: rgba(128, 128, 128, 0.08); --star: #f5b301; }
+    :root { color-scheme: light dark; --accent: #2b6cb0; --muted: #6b7280; --line: rgba(128, 128, 128, 0.3); --surface: rgba(128, 128, 128, 0.08); --star: #f5b301; --done: #16a34a; }
     * { box-sizing: border-box; }
     body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
     main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
@@ -82,7 +82,20 @@
     .empty { margin: 16px 0 0; color: var(--muted); }
     ol.episodes { list-style: none; margin: 12px 0 0; padding: 0; }
     ol.episodes li { padding: 8px 0; border-top: 1px solid var(--line); }
-    .ep-toolbar { display: flex; justify-content: flex-end; margin-top: 16px; }
+    .ep-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; }
+    .watch-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+    .season-progress { color: var(--muted); font-size: 0.85rem; }
+    .watch-toggle { flex: none; align-self: center; width: 36px; height: 36px; padding: 0; border: 2px solid var(--line); border-radius: 50%; background: none; color: transparent; font-weight: 700; }
+    .watch-toggle:hover, .watch-toggle:focus-visible { border-color: var(--done); color: var(--done); }
+    .watch-toggle[aria-pressed="true"] { border-color: var(--done); background: var(--done); color: #fff; }
+    li.episode.watched .still img { opacity: 0.5; }
+    li.episode.watched .ep-name { color: var(--muted); }
+    .season-card .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: rgba(0, 0, 0, 0.55); }
+    .season-card .progress[hidden] { display: none; }
+    .season-card .progress span { display: block; height: 100%; background: var(--done); }
+    .season-card.complete .thumb::after { content: "✓"; position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--done); color: #fff; font-size: 0.8rem; font-weight: 700; }
+    .resume-slot { display: contents; }
+    .up-next[hidden] { display: none; }
     ol.episodes li.episode { display: flex; gap: 16px; padding: 14px 0; }
     .still { flex: none; display: grid; place-items: center; width: 200px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: var(--surface); color: var(--muted); font-weight: 600; }
     .still img { width: 100%; height: 100%; object-fit: cover; }
@@ -420,8 +433,14 @@ function renderShow(show, images, requestedSeason) {
 
   const allSeasons = buildSeasons(seasons, aired);
   let openEpisode = null; // set below, once the season panel exists
-  const upNext = renderUpNext(embedded, today, (episode) => openEpisode && openEpisode(episode));
-  if (upNext) container.append(upNext);
+  const open = (episode) => openEpisode && openEpisode(episode);
+  const watch = createWatchList(show.id, () => refreshWatched());
+
+  // "Continue watching" (filled by refreshWatched), latest and next episode.
+  const upNext = renderUpNext(embedded, today, open) || el("div", "up-next");
+  const resumeSlot = el("div", "resume-slot");
+  upNext.prepend(resumeSlot);
+  container.append(upNext);
   if (allSeasons.length === 0) {
     container.append(el("p", "", "No aired episodes are listed for this series yet."));
     container.hidden = false;
@@ -439,6 +458,41 @@ function renderShow(show, images, requestedSeason) {
   container.append(head, strip, panel);
   if (cast) container.append(cast);
 
+  function refreshWatched() {
+    cards.forEach((card, i) => {
+      const season = allSeasons[i];
+      const done = watch.count(season.episodes);
+      const bar = card.querySelector(".progress");
+      bar.hidden = done === 0;
+      bar.firstChild.style.width = (season.episodes.length ? (100 * done) / season.episodes.length : 0) + "%";
+      card.classList.toggle("complete", season.episodes.length > 0 && done === season.episodes.length);
+    });
+
+    for (const row of panel.querySelectorAll("li.episode")) {
+      setEpisodeWatched(row, watch.has(Number(row.dataset.episodeId)));
+    }
+    const current = allSeasons[cards.findIndex((card) => card.getAttribute("aria-pressed") === "true")];
+    const toggle = panel.querySelector(".season-watch");
+    if (current && toggle) {
+      const done = watch.count(current.episodes);
+      const all = done === current.episodes.length;
+      toggle.textContent = all ? "Mark season unwatched" : "✓ Mark season watched";
+      panel.querySelector(".season-progress").textContent = done + " of " + current.episodes.length + " watched";
+    }
+
+    // Continue with the episode after the most recently aired one you watched.
+    let lastWatched = -1;
+    aired.forEach((episode, i) => { if (watch.has(episode.id)) lastWatched = i; });
+    resumeSlot.replaceChildren();
+    if (lastWatched >= 0) {
+      const nextUp = aired[lastWatched + 1];
+      resumeSlot.append(nextUp
+        ? upCard(nextUp, "Continue watching", { onOpen: open, when: airDateText(nextUp) })
+        : upCard(aired[lastWatched], "All caught up", { onOpen: open, when: "You have watched the latest aired episode" }));
+    }
+    upNext.hidden = upNext.childElementCount === 1 && resumeSlot.childElementCount === 0;
+  }
+
   const cards = allSeasons.map((season, index) => {
     const card = renderSeasonCard(show, season, today);
     card.addEventListener("click", () => selectSeason(index));
@@ -452,7 +506,8 @@ function renderShow(show, images, requestedSeason) {
     if (index < 0 || index >= allSeasons.length) return;
     cards.forEach((card, i) => card.setAttribute("aria-pressed", String(i === index)));
     if (scroll) cards[index].scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-    panel.replaceChildren(...renderSeasonPanel(show, allSeasons, index, today, selectSeason));
+    panel.replaceChildren(...renderSeasonPanel(show, allSeasons, index, today, selectSeason, watch));
+    refreshWatched();
     history.replaceState(null, "", "#show=" + show.id + "&season=" + allSeasons[index].number);
   }
   // Jump from the "Latest episode" card to that episode in its season.
@@ -537,6 +592,30 @@ function airDateText(episode) {
   return new Date(episode.airdate + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 }
 
+// One episode shortcut card. With onOpen (and a regular episode number) it becomes a button
+// that jumps to the episode in its season.
+function upCard(episode, label, { onOpen, when }) {
+  const openable = Boolean(onOpen) && episode.number !== null;
+  const node = el(openable ? "button" : "div", "up-card");
+  if (openable) {
+    node.type = "button";
+    node.addEventListener("click", () => onOpen(episode));
+  }
+  if (episode.image && episode.image.medium) {
+    const img = el("img");
+    img.src = episode.image.medium;
+    img.alt = "";
+    node.append(img);
+  }
+  const text = el("div", "up-text");
+  text.append(el("div", "up-label", label));
+  text.append(el("div", "up-name", formatEpisodeNumber(episode.season, episode.number) + " · " + (episode.name || "TBA")));
+  text.append(el("div", "up-when", when));
+  if (openable) text.append(el("div", "up-hint", "Show in season list →"));
+  node.append(text);
+  return node;
+}
+
 // Cards for the most recent and the next scheduled episode (either may be missing).
 function renderUpNext(embedded, today, onOpen) {
   const latest = embedded.previousepisode;
@@ -544,33 +623,12 @@ function renderUpNext(embedded, today, onOpen) {
   if (!latest && !next) return null;
   const row = el("div", "up-next");
 
-  const card = (episode, label, isNext) => {
-    const openable = !isNext && episode.number !== null;
-    const node = el(openable ? "button" : "div", "up-card");
-    if (openable) {
-      node.type = "button";
-      node.addEventListener("click", () => onOpen(episode));
-    }
-    if (episode.image && episode.image.medium) {
-      const img = el("img");
-      img.src = episode.image.medium;
-      img.alt = "";
-      node.append(img);
-    }
-    const text = el("div", "up-text");
-    text.append(el("div", "up-label", label));
-    text.append(el("div", "up-name", formatEpisodeNumber(episode.season, episode.number) + " · " + (episode.name || "TBA")));
+  if (latest && latest.airdate) row.append(upCard(latest, "Latest episode", { onOpen, when: airDateText(latest) }));
+  if (next && next.airdate) {
     // Count days from the visitor's local air date, matching the date shown.
-    const localDate = episode.airtime && episode.airstamp ? new Date(episode.airstamp).toLocaleDateString("en-CA") : episode.airdate;
-    const when = airDateText(episode) + (isNext ? " · " + daysUntil(localDate, today) : "");
-    text.append(el("div", "up-when", when));
-    if (openable) text.append(el("div", "up-hint", "Show in season list →"));
-    node.append(text);
-    return node;
-  };
-
-  if (latest && latest.airdate) row.append(card(latest, "Latest episode", false));
-  if (next && next.airdate) row.append(card(next, "Next episode", true));
+    const localDate = next.airtime && next.airstamp ? new Date(next.airstamp).toLocaleDateString("en-CA") : next.airdate;
+    row.append(upCard(next, "Next episode", { when: airDateText(next) + " · " + daysUntil(localDate, today) }));
+  }
   return row.childElementCount ? row : null;
 }
 
@@ -621,11 +679,15 @@ function renderSeasonCard(show, season, today) {
     thumb.append(img);
   }
   if (!own) thumb.append(el("span", "label", "S" + season.number));
+  const progress = el("div", "progress");
+  progress.hidden = true;
+  progress.append(el("span"));
+  thumb.append(progress);
   card.append(thumb, el("div", "name", seasonTitle(season)), el("div", "meta", seasonMeta(season, today)));
   return card;
 }
 
-function renderSeasonPanel(show, allSeasons, index, today, selectSeason) {
+function renderSeasonPanel(show, allSeasons, index, today, selectSeason, watch) {
   const season = allSeasons[index];
   const nav = el("div", "season-nav");
   const makeStep = (target, label) => {
@@ -659,7 +721,15 @@ function renderSeasonPanel(show, allSeasons, index, today, selectSeason) {
   const toolbar = el("div", "ep-toolbar");
   const sortButton = el("button", "step");
   sortButton.type = "button";
-  toolbar.append(sortButton);
+  const watchAll = el("button", "step season-watch");
+  watchAll.type = "button";
+  watchAll.addEventListener("click", () => {
+    const all = watch.count(season.episodes) === season.episodes.length;
+    watch.set(season.episodes.map((episode) => episode.id), !all);
+  });
+  const watchGroup = el("div", "watch-group");
+  watchGroup.append(watchAll, el("span", "season-progress"));
+  toolbar.append(watchGroup, sortButton);
   const list = el("ol", "episodes");
 
   const finaleLabel = show.ended && index === allSeasons.length - 1 ? "Series finale" : "Season finale";
@@ -667,7 +737,7 @@ function renderSeasonPanel(show, allSeasons, index, today, selectSeason) {
     const ordered = newestFirst ? [...season.episodes].reverse() : season.episodes;
     sortButton.textContent = newestFirst ? "↓ Newest first" : "↑ Oldest first";
     sortButton.setAttribute("aria-label", "Sort order: " + (newestFirst ? "newest first" : "oldest first") + ". Click to change.");
-    list.replaceChildren(...ordered.map((episode) => renderEpisode(episode, episode.id === finaleId ? finaleLabel : "")));
+    list.replaceChildren(...ordered.map((episode) => renderEpisode(episode, episode.id === finaleId ? finaleLabel : "", watch)));
   };
   sortButton.addEventListener("click", () => {
     newestFirst = !newestFirst;
@@ -692,7 +762,7 @@ function finaleEpisodeId(show, season, isLastSeason, today) {
   return complete ? last.id : null;
 }
 
-function renderEpisode(episode, label) {
+function renderEpisode(episode, label, watch) {
   const item = el("li", "episode");
   item.dataset.episodeId = episode.id;
 
@@ -733,7 +803,13 @@ function renderEpisode(episode, label) {
     addReadMore(summary);
   }
 
-  item.append(still, body);
+  const toggle = el("button", "watch-toggle", "✓");
+  toggle.type = "button";
+  toggle.setAttribute("aria-label", "Watched " + formatEpisodeNumber(episode.season, episode.number) + " " + episode.name);
+  toggle.addEventListener("click", () => watch.set([episode.id], !watch.has(episode.id)));
+
+  item.append(still, body, toggle);
+  setEpisodeWatched(item, watch.has(episode.id));
   return item;
 }
 
@@ -751,6 +827,31 @@ function saveSetting(key, value) {
 }
 
 let newestFirst = loadSetting("newestFirst", false);
+
+// Watched episodes for one show, kept in this browser only (no account needed).
+function createWatchList(showId, onChange) {
+  const key = "watched:" + showId;
+  const ids = new Set(loadSetting(key, []));
+  return {
+    has: (id) => ids.has(id),
+    count: (episodes) => episodes.filter((episode) => ids.has(episode.id)).length,
+    set(episodeIds, watched) {
+      for (const id of episodeIds) {
+        if (watched) ids.add(id);
+        else ids.delete(id);
+      }
+      saveSetting(key, [...ids]);
+      onChange();
+    }
+  };
+}
+
+function setEpisodeWatched(row, watched) {
+  row.classList.toggle("watched", watched);
+  const button = row.querySelector(".watch-toggle");
+  button.setAttribute("aria-pressed", String(watched));
+  button.title = watched ? "Watched – click to undo" : "Mark as watched";
+}
 
 // Set while a show is displayed: moves the season selection by -1 or +1.
 let seasonKeys = null;
