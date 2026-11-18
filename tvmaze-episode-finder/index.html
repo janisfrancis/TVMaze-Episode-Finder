@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Episode Finder</title>
+  <style>
+    :root { color-scheme: light dark; --accent: #2b6cb0; --muted: #6b7280; --line: rgba(128, 128, 128, 0.3); }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+    h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    .lead { margin: 0 0 20px; color: var(--muted); }
+    form { display: flex; gap: 8px; }
+    input[type="search"] { flex: 1; padding: 10px 12px; font: inherit; border: 1px solid var(--line); border-radius: 8px; }
+    button { font: inherit; cursor: pointer; }
+    form button { padding: 10px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; }
+    #status { min-height: 1.5em; margin: 16px 0; color: var(--muted); }
+    #status.error { color: #c53030; }
+    .results { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    .result { display: flex; gap: 12px; width: 100%; padding: 8px; text-align: left; color: inherit; background: none; border: 1px solid var(--line); border-radius: 8px; }
+    .result:hover, .result:focus-visible { border-color: var(--accent); }
+    .result img, .result .noimg { width: 48px; height: 68px; flex: none; object-fit: cover; border-radius: 4px; background: var(--line); }
+    .result .name { font-weight: 600; }
+    .result .meta { color: var(--muted); font-size: 0.9rem; }
+    .show-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+    .show-head h2 { margin: 0; font-size: 1.3rem; }
+    .toggles button { padding: 4px 10px; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; }
+    details { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+    summary { padding: 10px 12px; cursor: pointer; font-weight: 600; }
+    summary .count { font-weight: 400; color: var(--muted); }
+    ol.episodes { list-style: none; margin: 0; padding: 0 12px 8px; }
+    ol.episodes li { padding: 8px 0; border-top: 1px solid var(--line); }
+    .ep-title { display: flex; gap: 12px; }
+    .ep-num { flex: none; width: 3.2em; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .ep-name { flex: 1; font-weight: 500; }
+    .ep-date { flex: none; color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+    .ep-summary { margin: 2px 0 0 calc(3.2em + 12px); color: var(--muted); font-size: 0.9rem; }
+    footer { margin-top: 40px; color: var(--muted); font-size: 0.85rem; }
+    footer a, .lead a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Episode Finder</h1>
+  <p class="lead">Search any TV series and see every episode that has aired.</p>
+
+  <form id="search-form">
+    <input id="query" type="search" placeholder="e.g. The Big Bang Theory" aria-label="TV series name" autocomplete="off" required>
+    <button type="submit">Search</button>
+  </form>
+
+  <p id="status" role="status" aria-live="polite"></p>
+  <ul id="results" class="results"></ul>
+  <section id="show" hidden></section>
+
+  <footer>
+    Data from <a href="https://www.tvmaze.com/api" target="_blank" rel="noopener">TVmaze.com</a>,
+    licensed <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>.
+  </footer>
+</main>
+
+<script>
+"use strict";
+
+const API = "https://api.tvmaze.com";
+const cache = new Map(); // remembers answers while the page stays open
+
+// ---------- Talking to the API ----------
+
+// Fetch JSON from TVmaze with a timeout, a cache and readable error messages.
+async function getJson(path) {
+  if (cache.has(path)) return cache.get(path);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(API + path, { signal: controller.signal });
+    if (response.status === 429) {
+      throw new Error("TVmaze says there were too many requests. Wait a few seconds and try again.");
+    }
+    if (!response.ok) {
+      throw new Error("TVmaze returned an error (" + response.status + ").");
+    }
+    const data = await response.json();
+    cache.set(path, data);
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("TVmaze took too long to answer. Please try again.");
+    if (error instanceof TypeError) throw new Error("Could not reach TVmaze. Check your internet connection.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------- Pure helpers (no page access, easy to test) ----------
+
+// Today's date as YYYY-MM-DD in the visitor's time zone.
+function todayString() {
+  return new Date().toLocaleDateString("en-CA");
+}
+
+// An episode counts as aired if it has an air date that is today or earlier.
+function isAired(episode, today) {
+  return Boolean(episode.airdate) && episode.airdate <= today;
+}
+
+// Turn the flat episode list into [{ season: 1, episodes: [...] }, ...].
+function groupBySeason(episodes) {
+  const seasons = new Map();
+  for (const episode of episodes) {
+    if (!seasons.has(episode.season)) seasons.set(episode.season, []);
+    seasons.get(episode.season).push(episode);
+  }
+  return [...seasons.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([season, list]) => ({ season, episodes: list }));
+}
+
+// TVmaze summaries contain HTML tags; keep only the plain text.
+function plainText(html) {
+  if (!html) return "";
+  return new DOMParser().parseFromString(html, "text/html").body.textContent.trim();
+}
+
+function formatEpisodeNumber(season, number) {
+  if (number === null || number === undefined) return "Special";
+  return "S" + String(season).padStart(2, "0") + "E" + String(number).padStart(2, "0");
+}
+
+// ---------- Building the page ----------
+
+// Small helper to create an element. Text is inserted as text, never as HTML,
+// so data from the API cannot inject code into the page.
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function setStatus(message, isError) {
+  const status = document.getElementById("status");
+  status.textContent = message;
+  status.className = isError ? "error" : "";
+}
+
+function renderResults(matches) {
+  const list = document.getElementById("results");
+  list.replaceChildren();
+  document.getElementById("show").hidden = true;
+
+  for (const { show } of matches) {
+    const button = el("button", "result");
+    button.type = "button";
+    if (show.image && show.image.medium) {
+      const img = el("img");
+      img.src = show.image.medium;
+      img.alt = "";
+      img.loading = "lazy";
+      button.append(img);
+    } else {
+      button.append(el("div", "noimg"));
+    }
+
+    const text = el("div");
+    text.append(el("div", "name", show.name));
+    const year = show.premiered ? show.premiered.slice(0, 4) : "year unknown";
+    const parts = [year, show.status, show.network && show.network.name].filter(Boolean);
+    text.append(el("div", "meta", parts.join(" · ")));
+    button.append(text);
+
+    button.addEventListener("click", () => { location.hash = "show=" + show.id; });
+
+    const item = el("li");
+    item.append(button);
+    list.append(item);
+  }
+}
+
+function renderShow(show, episodes) {
+  const today = todayString();
+  const aired = episodes.filter((episode) => isAired(episode, today));
+  const container = document.getElementById("show");
+  container.replaceChildren();
+
+  const head = el("div", "show-head");
+  head.append(el("h2", "", show.name + " – " + aired.length + " episodes aired"));
+  const toggles = el("div", "toggles");
+  const expand = el("button", "", "Expand all");
+  const collapse = el("button", "", "Collapse all");
+  expand.type = collapse.type = "button";
+  const setAll = (open) => container.querySelectorAll("details").forEach((d) => { d.open = open; });
+  expand.addEventListener("click", () => setAll(true));
+  collapse.addEventListener("click", () => setAll(false));
+  toggles.append(expand, " ", collapse);
+  head.append(toggles);
+  container.append(head);
+
+  if (aired.length === 0) {
+    container.append(el("p", "", "No aired episodes are listed for this series yet."));
+  }
+
+  groupBySeason(aired).forEach((group, index) => {
+    const details = el("details");
+    details.open = index === 0;
+    const summary = el("summary", "", "Season " + group.season + " ");
+    summary.append(el("span", "count", "(" + group.episodes.length + " episodes)"));
+    details.append(summary);
+
+    const list = el("ol", "episodes");
+    for (const episode of group.episodes) {
+      const item = el("li");
+      const title = el("div", "ep-title");
+      title.append(
+        el("span", "ep-num", formatEpisodeNumber(episode.season, episode.number)),
+        el("span", "ep-name", episode.name),
+        el("span", "ep-date", episode.airdate)
+      );
+      item.append(title);
+      const summaryText = plainText(episode.summary);
+      if (summaryText) item.append(el("p", "ep-summary", summaryText));
+      list.append(item);
+    }
+    details.append(list);
+    container.append(details);
+  });
+
+  container.hidden = false;
+}
+
+// ---------- What happens when the visitor acts ----------
+
+async function runSearch(query) {
+  setStatus("Searching…");
+  document.getElementById("show").hidden = true;
+  try {
+    const matches = await getJson("/search/shows?q=" + encodeURIComponent(query));
+    renderResults(matches.slice(0, 8));
+    setStatus(matches.length ? "Pick the series you meant:" : "No series found for “" + query + "”.");
+  } catch (error) {
+    document.getElementById("results").replaceChildren();
+    setStatus(error.message, true);
+  }
+}
+
+async function loadShow(id) {
+  setStatus("Loading episodes…");
+  document.getElementById("results").replaceChildren();
+  try {
+    const [show, episodes] = await Promise.all([
+      getJson("/shows/" + id),
+      getJson("/shows/" + id + "/episodes")
+    ]);
+    renderShow(show, episodes);
+    setStatus("");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+// The address (#show=66) lets people bookmark or share a series.
+function loadFromHash() {
+  const match = location.hash.match(/^#show=(\d+)$/);
+  if (match) loadShow(match[1]);
+}
+
+document.getElementById("search-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const query = document.getElementById("query").value.trim();
+  if (query) {
+    if (location.hash) history.replaceState(null, "", location.pathname);
+    runSearch(query);
+  }
+});
+window.addEventListener("hashchange", loadFromHash);
+loadFromHash();
+</script>
+</body>
+</html>
