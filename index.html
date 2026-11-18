@@ -95,6 +95,14 @@
     .season-card .progress span { display: block; height: 100%; background: var(--done); }
     .season-card.complete .thumb::after { content: "✓"; position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--done); color: #fff; font-size: 0.8rem; font-weight: 700; }
     .resume-slot { display: contents; }
+    .head-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+    .spoiler-toggle[aria-pressed="true"] { border-color: var(--accent); }
+    .spoilers li.episode:not(.watched):not(.revealed) .still { cursor: pointer; }
+    .spoilers li.episode:not(.watched):not(.revealed) .still img,
+    .spoilers .up-card.spoiler img { filter: blur(14px); transform: scale(1.15); }
+    .spoilers .up-card.spoiler img { transform: none; clip-path: inset(0 round 6px); }
+    .spoilers li.episode:not(.watched):not(.revealed) .ep-summary { filter: blur(5px); cursor: pointer; user-select: none; }
+    .spoilers li.episode:not(.watched):not(.revealed) .ep-summary + .link-button { visibility: hidden; }
     .up-next[hidden] { display: none; }
     ol.episodes li.episode { display: flex; gap: 16px; padding: 14px 0; }
     .still { flex: none; display: grid; place-items: center; width: 200px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: var(--surface); color: var(--muted); font-weight: 600; }
@@ -451,7 +459,10 @@ function renderShow(show, images, requestedSeason) {
 
   const head = el("div", "show-head");
   head.append(el("h2", "", "Seasons"));
-  if (allSeasons.length > 1) head.append(el("span", "hint", "Tip: ← and → switch seasons"));
+  const tools = el("div", "head-tools");
+  if (allSeasons.length > 1) tools.append(el("span", "hint", "Tip: ← and → switch seasons"));
+  tools.append(renderSpoilerToggle(container));
+  head.append(tools);
   const strip = el("ul", "season-strip");
   const panel = el("section", "season-panel");
   panel.setAttribute("aria-live", "polite");
@@ -487,7 +498,7 @@ function renderShow(show, images, requestedSeason) {
     if (lastWatched >= 0) {
       const nextUp = aired[lastWatched + 1];
       resumeSlot.append(nextUp
-        ? upCard(nextUp, "Continue watching", { onOpen: open, when: airDateText(nextUp) })
+        ? upCard(nextUp, "Continue watching", { onOpen: open, when: airDateText(nextUp), spoiler: true })
         : upCard(aired[lastWatched], "All caught up", { onOpen: open, when: "You have watched the latest aired episode" }));
     }
     upNext.hidden = upNext.childElementCount === 1 && resumeSlot.childElementCount === 0;
@@ -594,9 +605,9 @@ function airDateText(episode) {
 
 // One episode shortcut card. With onOpen (and a regular episode number) it becomes a button
 // that jumps to the episode in its season.
-function upCard(episode, label, { onOpen, when }) {
+function upCard(episode, label, { onOpen, when, spoiler = false }) {
   const openable = Boolean(onOpen) && episode.number !== null;
-  const node = el(openable ? "button" : "div", "up-card");
+  const node = el(openable ? "button" : "div", spoiler ? "up-card spoiler" : "up-card");
   if (openable) {
     node.type = "button";
     node.addEventListener("click", () => onOpen(episode));
@@ -623,7 +634,7 @@ function renderUpNext(embedded, today, onOpen) {
   if (!latest && !next) return null;
   const row = el("div", "up-next");
 
-  if (latest && latest.airdate) row.append(upCard(latest, "Latest episode", { onOpen, when: airDateText(latest) }));
+  if (latest && latest.airdate) row.append(upCard(latest, "Latest episode", { onOpen, when: airDateText(latest), spoiler: true }));
   if (next && next.airdate) {
     // Count days from the visitor's local air date, matching the date shown.
     const localDate = next.airtime && next.airstamp ? new Date(next.airstamp).toLocaleDateString("en-CA") : next.airdate;
@@ -808,6 +819,16 @@ function renderEpisode(episode, label, watch) {
   toggle.setAttribute("aria-label", "Watched " + formatEpisodeNumber(episode.season, episode.number) + " " + episode.name);
   toggle.addEventListener("click", () => watch.set([episode.id], !watch.has(episode.id)));
 
+  // While spoilers are hidden, the first click on a blurred still or summary reveals it.
+  const reveal = (event) => {
+    if (!item.closest(".spoilers") || item.classList.contains("watched") || item.classList.contains("revealed")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    item.classList.add("revealed");
+  };
+  still.addEventListener("click", reveal);
+  body.addEventListener("click", reveal, true);
+
   item.append(still, body, toggle);
   setEpisodeWatched(item, watch.has(episode.id));
   return item;
@@ -827,6 +848,27 @@ function saveSetting(key, value) {
 }
 
 let newestFirst = loadSetting("newestFirst", false);
+
+// When on, stills and summaries of unwatched episodes are blurred until clicked.
+let hideSpoilers = loadSetting("hideSpoilers", false);
+
+function renderSpoilerToggle(container) {
+  const button = el("button", "step spoiler-toggle");
+  button.type = "button";
+  const apply = () => {
+    container.classList.toggle("spoilers", hideSpoilers);
+    button.setAttribute("aria-pressed", String(hideSpoilers));
+    button.textContent = hideSpoilers ? "🙈 Spoilers hidden" : "👁 Hide spoilers";
+  };
+  button.addEventListener("click", () => {
+    hideSpoilers = !hideSpoilers;
+    saveSetting("hideSpoilers", hideSpoilers);
+    container.querySelectorAll(".revealed").forEach((node) => node.classList.remove("revealed"));
+    apply();
+  });
+  apply();
+  return button;
+}
 
 // Watched episodes for one show, kept in this browser only (no account needed).
 function createWatchList(showId, onChange) {
