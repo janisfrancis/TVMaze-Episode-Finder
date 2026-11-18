@@ -3,6 +3,21 @@
 Search any TV series and see every episode that has aired, grouped by season.
 Built on the free [TVmaze API](https://www.tvmaze.com/api) (no API key needed).
 
+## Features (web page)
+
+- **Series header**: backdrop, poster, years, genres, status, channel, runtime, rating, summary
+  and links to TVmaze, IMDb and the official site, followed by a facts panel.
+- **Latest, next and continue-watching cards**: jump straight to the episode in its season;
+  the next episode shows its local air time and a countdown.
+- **Seasons as poster cards**: the show poster stands in when a season has none. Switch seasons
+  with the cards, the Previous/Next buttons or the ← and → keys.
+- **Episode rows**: still image, air date, runtime, rating, a finale badge and a short summary
+  with *Read more*. Sort oldest or newest first.
+- **Watched tracking**: tick episodes or whole seasons. Progress shows on the season cards.
+  Saved in your browser only, with no account.
+- **Hide spoilers**: blurs stills and summaries of episodes you have not watched yet.
+- **Main cast** with photos and character names.
+
 This repository has two parts:
 
 | File | What it is |
@@ -55,9 +70,16 @@ Results are cached for 24 hours in a `.tvmaze_cache` folder (ignored by git).
 ## How it works
 
 - The page searches `GET /search/shows?q=<name>` and lists the best matches.
-- Picking a match loads `GET /shows/<id>/episodes`.
-- Only episodes with an air date of today or earlier are shown.
-- The address changes to `#show=<id>` so a series can be bookmarked or shared.
+- Picking a match loads everything in one request:
+  `GET /shows/<id>?embed[]=seasons&embed[]=episodes&embed[]=cast&embed[]=nextepisode&embed[]=previousepisode`,
+  plus `GET /shows/<id>/images` for the backdrop.
+- Only episodes with an air date of today or earlier are listed. Specials are not included.
+- The address changes to `#show=<id>&season=<n>` so a series and season can be bookmarked or shared.
+- Watched episodes, the sort order and the spoiler setting are kept in the browser's `localStorage`.
+  They stay on that device and browser.
+- Images are loaded straight from TVmaze's image server, which TVmaze explicitly allows.
+- Data coverage varies: popular shows have images, ratings and summaries for nearly every episode,
+  while some older or less-watched shows have few. The page hides anything that is missing.
 
 ## Data and licence
 
