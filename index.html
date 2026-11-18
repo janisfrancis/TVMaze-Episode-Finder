@@ -35,6 +35,7 @@
     @media (max-width: 600px) {
       .hero-inner { flex-direction: column; padding: 16px; gap: 16px; }
       .hero .poster, .hero .noposter { width: 120px; }
+      .show-head .hint { display: none; }
       .hero h2 { font-size: 1.5rem; }
     }
     h1 { margin: 0 0 4px; font-size: 1.6rem; }
@@ -53,11 +54,32 @@
     .result .meta { color: var(--muted); font-size: 0.9rem; }
     .show-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
     .show-head h2 { margin: 0; font-size: 1.3rem; }
-    .toggles button { padding: 4px 10px; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; }
-    details { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
-    summary { padding: 10px 12px; cursor: pointer; font-weight: 600; }
-    summary .count { font-weight: 400; color: var(--muted); }
-    ol.episodes { list-style: none; margin: 0; padding: 0 12px 8px; }
+    .show-head .hint { color: var(--muted); font-size: 0.85rem; }
+    .season-strip { display: flex; gap: 14px; overflow-x: auto; list-style: none; margin: 0 0 16px; padding: 8px 8px 12px; scroll-snap-type: x proximity; }
+    .season-strip li { flex: none; scroll-snap-align: start; }
+    .season-card { width: 128px; padding: 0; text-align: left; color: inherit; background: none; border: 0; }
+    .season-card .thumb { position: relative; aspect-ratio: 2 / 3; overflow: hidden; border-radius: 8px; background: var(--surface); outline: 3px solid transparent; outline-offset: 3px; transition: outline-color 0.15s; }
+    .season-card img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .season-card .thumb.fallback img { filter: brightness(0.4) saturate(0.6); }
+    .season-card .label { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 1.6rem; font-weight: 700; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6); }
+    .season-card:hover .thumb { outline-color: var(--line); }
+    .season-card[aria-pressed="true"] .thumb { outline-color: var(--accent); }
+    .season-card:focus-visible { outline: none; }
+    .season-card:focus-visible .thumb { outline-color: var(--accent); outline-style: dashed; }
+    .season-card .name { margin-top: 8px; font-weight: 600; font-size: 0.95rem; line-height: 1.3; }
+    .season-card .meta { color: var(--muted); font-size: 0.85rem; }
+    .season-card.upcoming .thumb { opacity: 0.55; }
+    .season-panel { padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+    .season-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .season-title { text-align: center; }
+    .season-title h3 { margin: 0; font-size: 1.2rem; }
+    .season-title .meta { color: var(--muted); font-size: 0.9rem; }
+    .step { flex: none; padding: 6px 12px; color: inherit; background: none; border: 1px solid var(--line); border-radius: 8px; }
+    .step:hover:not(:disabled) { border-color: var(--accent); }
+    .step.placeholder { visibility: hidden; }
+    .season-summary { margin: 12px 0 0; color: var(--muted); }
+    .empty { margin: 16px 0 0; color: var(--muted); }
+    ol.episodes { list-style: none; margin: 12px 0 0; padding: 0; }
     ol.episodes li { padding: 8px 0; border-top: 1px solid var(--line); }
     .ep-title { display: flex; gap: 12px; }
     .ep-num { flex: none; width: 3.2em; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -343,7 +365,7 @@ function renderInfo(show, seasons, airedCount) {
   return list;
 }
 
-function renderShow(show, images) {
+function renderShow(show, images, requestedSeason) {
   const embedded = show._embedded || {};
   const episodes = embedded.episodes || [];
   const seasons = embedded.seasons || [];
@@ -355,50 +377,165 @@ function renderShow(show, images) {
 
   container.append(renderHero(show, images), renderInfo(show, seasons, aired.length));
 
-  const head = el("div", "show-head");
-  head.append(el("h2", "", "Episodes"));
-  const toggles = el("div", "toggles");
-  const expand = el("button", "", "Expand all");
-  const collapse = el("button", "", "Collapse all");
-  expand.type = collapse.type = "button";
-  const setAll = (open) => container.querySelectorAll("details").forEach((d) => { d.open = open; });
-  expand.addEventListener("click", () => setAll(true));
-  collapse.addEventListener("click", () => setAll(false));
-  toggles.append(expand, " ", collapse);
-  head.append(toggles);
-  container.append(head);
-
-  if (aired.length === 0) {
+  const allSeasons = buildSeasons(seasons, aired);
+  if (allSeasons.length === 0) {
     container.append(el("p", "", "No aired episodes are listed for this series yet."));
+    container.hidden = false;
+    return;
   }
 
-  groupBySeason(aired).forEach((group, index) => {
-    const details = el("details");
-    details.open = index === 0;
-    const summary = el("summary", "", "Season " + group.season + " ");
-    summary.append(el("span", "count", "(" + group.episodes.length + " episodes)"));
-    details.append(summary);
+  const head = el("div", "show-head");
+  head.append(el("h2", "", "Seasons"));
+  if (allSeasons.length > 1) head.append(el("span", "hint", "Tip: ← and → switch seasons"));
+  const strip = el("ul", "season-strip");
+  const panel = el("section", "season-panel");
+  panel.setAttribute("aria-live", "polite");
+  container.append(head, strip, panel);
 
-    const list = el("ol", "episodes");
-    for (const episode of group.episodes) {
-      const item = el("li");
-      const title = el("div", "ep-title");
-      title.append(
-        el("span", "ep-num", formatEpisodeNumber(episode.season, episode.number)),
-        el("span", "ep-name", episode.name),
-        el("span", "ep-date", episode.airdate)
-      );
-      item.append(title);
-      const summaryText = plainText(episode.summary);
-      if (summaryText) item.append(el("p", "ep-summary", summaryText));
-      list.append(item);
-    }
-    details.append(list);
-    container.append(details);
+  const cards = allSeasons.map((season, index) => {
+    const card = renderSeasonCard(show, season, today);
+    card.addEventListener("click", () => selectSeason(index));
+    const item = el("li");
+    item.append(card);
+    strip.append(item);
+    return card;
   });
 
+  function selectSeason(index, scroll = true) {
+    if (index < 0 || index >= allSeasons.length) return;
+    cards.forEach((card, i) => card.setAttribute("aria-pressed", String(i === index)));
+    if (scroll) cards[index].scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    panel.replaceChildren(...renderSeasonPanel(allSeasons, index, today, selectSeason));
+    history.replaceState(null, "", "#show=" + show.id + "&season=" + allSeasons[index].number);
+  }
+  seasonKeys = (delta) => {
+    const current = cards.findIndex((card) => card.getAttribute("aria-pressed") === "true");
+    selectSeason(current + delta);
+  };
+
+  // Start with the season from the address, else the latest season that has aired episodes.
+  let start = allSeasons.findIndex((season) => season.number === requestedSeason);
+  if (start === -1) {
+    start = allSeasons.length - 1;
+    while (start > 0 && allSeasons[start].episodes.length === 0) start -= 1;
+  }
   container.hidden = false;
+  selectSeason(start, false);
+  requestAnimationFrame(() => {
+    strip.scrollLeft += cards[start].getBoundingClientRect().left - strip.getBoundingClientRect().left - 8;
+  });
 }
+
+// Merge TVmaze's season list with the aired episodes: [{ number, info, episodes }, ...].
+// A season can exist without aired episodes (announced) or episodes without a season entry.
+function buildSeasons(seasonList, airedEpisodes) {
+  const info = new Map(seasonList.map((season) => [season.number, season]));
+  const groups = new Map(groupBySeason(airedEpisodes).map((group) => [group.season, group.episodes]));
+  const numbers = new Set([...info.keys(), ...groups.keys()]);
+  return [...numbers]
+    .sort((a, b) => a - b)
+    .map((number) => ({ number, info: info.get(number) || null, episodes: groups.get(number) || [] }));
+}
+
+// "2022 · 9 episodes", "2025 · 3 of 10 aired", "Premieres 12 Jan 2027"
+function seasonMeta(season, today) {
+  const info = season.info || {};
+  const aired = season.episodes.length;
+  if (aired === 0) {
+    return info.premiereDate && info.premiereDate > today ? "Premieres " + formatDate(info.premiereDate) : "Not aired yet";
+  }
+  const start = info.premiereDate || season.episodes[0].airdate;
+  const planned = info.episodeOrder;
+  const count = planned && planned > aired ? aired + " of " + planned + " aired" : aired + (aired === 1 ? " episode" : " episodes");
+  return [start ? start.slice(0, 4) : "", count].filter(Boolean).join(" · ");
+}
+
+function seasonTitle(season) {
+  const name = season.info && season.info.name;
+  const base = "Season " + season.number;
+  return name && name !== base ? base + ": " + name : base;
+}
+
+function renderSeasonCard(show, season, today) {
+  const card = el("button", "season-card");
+  card.type = "button";
+  if (season.episodes.length === 0) card.classList.add("upcoming");
+
+  // Season poster if TVmaze has one; otherwise the show poster, dimmed, with the season number on top.
+  const own = season.info && season.info.image && season.info.image.medium;
+  const fallback = show.image && show.image.medium;
+  const thumb = el("div", own ? "thumb" : "thumb fallback");
+  if (own || fallback) {
+    const img = el("img");
+    img.src = own || fallback;
+    img.alt = "";
+    img.loading = "lazy";
+    thumb.append(img);
+  }
+  if (!own) thumb.append(el("span", "label", "S" + season.number));
+  card.append(thumb, el("div", "name", seasonTitle(season)), el("div", "meta", seasonMeta(season, today)));
+  return card;
+}
+
+function renderSeasonPanel(allSeasons, index, today, selectSeason) {
+  const season = allSeasons[index];
+  const nav = el("div", "season-nav");
+  const makeStep = (target, label) => {
+    const button = el("button", "step", label);
+    button.type = "button";
+    if (target < 0 || target >= allSeasons.length) {
+      button.disabled = true;
+      button.classList.add("placeholder");
+    } else {
+      button.addEventListener("click", () => selectSeason(target));
+    }
+    return button;
+  };
+  const heading = el("div", "season-title");
+  heading.append(el("h3", "", seasonTitle(season)), el("span", "meta", seasonMeta(season, today)));
+  nav.append(
+    makeStep(index - 1, "‹ Previous"),
+    heading,
+    makeStep(index + 1, "Next ›")
+  );
+
+  const parts = [nav];
+  const summaryText = season.info && plainText(season.info.summary);
+  if (summaryText) parts.push(el("p", "season-summary", summaryText));
+
+  if (season.episodes.length === 0) {
+    parts.push(el("p", "empty", "No episodes of this season have aired yet."));
+    return parts;
+  }
+  const list = el("ol", "episodes");
+  for (const episode of season.episodes) list.append(renderEpisode(episode));
+  parts.push(list);
+  return parts;
+}
+
+function renderEpisode(episode) {
+  const item = el("li");
+  const title = el("div", "ep-title");
+  title.append(
+    el("span", "ep-num", formatEpisodeNumber(episode.season, episode.number)),
+    el("span", "ep-name", episode.name),
+    el("span", "ep-date", episode.airdate)
+  );
+  item.append(title);
+  const summaryText = plainText(episode.summary);
+  if (summaryText) item.append(el("p", "ep-summary", summaryText));
+  return item;
+}
+
+// Set while a show is displayed: moves the season selection by -1 or +1.
+let seasonKeys = null;
+document.addEventListener("keydown", (event) => {
+  if (!seasonKeys || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (event.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (document.getElementById("show").hidden) return;
+  if (event.key === "ArrowLeft") { event.preventDefault(); seasonKeys(-1); }
+  if (event.key === "ArrowRight") { event.preventDefault(); seasonKeys(1); }
+});
 
 // ---------- What happens when the visitor acts ----------
 
@@ -416,7 +553,7 @@ async function runSearch(query) {
   }
 }
 
-async function loadShow(id) {
+async function loadShow(id, season) {
   setStatus("Loading episodes…");
   document.getElementById("results").replaceChildren();
   try {
@@ -426,17 +563,17 @@ async function loadShow(id) {
       getJson("/shows/" + id + "?embed[]=seasons&embed[]=episodes&embed[]=cast&embed[]=nextepisode&embed[]=previousepisode"),
       getJson("/shows/" + id + "/images").catch(() => [])
     ]);
-    renderShow(show, images);
+    renderShow(show, images, season);
     setStatus("");
   } catch (error) {
     setStatus(error.message, true);
   }
 }
 
-// The address (#show=66) lets people bookmark or share a series.
+// The address (#show=66&season=2) lets people bookmark or share a series and season.
 function loadFromHash() {
-  const match = location.hash.match(/^#show=(\d+)$/);
-  if (match) loadShow(match[1]);
+  const match = location.hash.match(/^#show=(\d+)(?:&season=(\d+))?$/);
+  if (match) loadShow(match[1], match[2] === undefined ? null : Number(match[2]));
 }
 
 document.getElementById("search-form").addEventListener("submit", (event) => {
