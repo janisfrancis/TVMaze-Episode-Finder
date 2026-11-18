@@ -10,7 +10,8 @@ Built on the free [TVmaze API](https://www.tvmaze.com/api) (no API key needed).
 - **Latest, next and continue-watching cards**: jump straight to the episode in its season;
   the next episode shows its local air time and a countdown.
 - **Seasons as poster cards**: the show poster stands in when a season has none. Switch seasons
-  with the cards, the Previous/Next buttons or the ← and → keys.
+  with the cards, the Previous/Next buttons or the ← and → keys. Recaps and behind-the-scenes
+  specials, when TVmaze lists any, sit in one extra *Specials* card after the last season.
 - **Episode rows**: still image, air date, runtime, rating, a finale badge and a short summary
   with *Read more*. Sort oldest or newest first.
 - **Watched tracking**: tick episodes or whole seasons. Progress shows on the season cards.
@@ -72,8 +73,8 @@ Results are cached for 24 hours in a `.tvmaze_cache` folder (ignored by git).
 - The page searches `GET /search/shows?q=<name>` and lists the best matches.
 - Picking a match loads everything in one request:
   `GET /shows/<id>?embed[]=seasons&embed[]=episodes&embed[]=cast&embed[]=nextepisode&embed[]=previousepisode`,
-  plus `GET /shows/<id>/images` for the backdrop.
-- Only episodes with an air date of today or earlier are listed. Specials are not included.
+  plus `GET /shows/<id>/images` for the backdrop and `GET /shows/<id>/episodes?specials=1` for the specials.
+- Only episodes with an air date of today or earlier are listed.
 - The address changes to `#show=<id>&season=<n>` so a series and season can be bookmarked or shared.
 - Watched episodes, the sort order and the spoiler setting are kept in the browser's `localStorage`.
   They stay on that device and browser.

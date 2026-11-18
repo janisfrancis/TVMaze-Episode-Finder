@@ -231,7 +231,7 @@ function plainText(html) {
 }
 
 function formatEpisodeNumber(season, number) {
-  if (number === null || number === undefined) return "Special";
+  if (number === null || number === undefined) return "S" + String(season).padStart(2, "0") + " special";
   return "S" + String(season).padStart(2, "0") + "E" + String(number).padStart(2, "0");
 }
 
@@ -430,7 +430,7 @@ function renderInfo(show, seasons, airedCount) {
   return list;
 }
 
-function renderShow(show, images, requestedSeason) {
+function renderShow(show, images, requestedSeason, specials = []) {
   const embedded = show._embedded || {};
   const episodes = embedded.episodes || [];
   const seasons = embedded.seasons || [];
@@ -443,6 +443,9 @@ function renderShow(show, images, requestedSeason) {
   container.append(renderHero(show, images), renderInfo(show, seasons, aired.length));
 
   const allSeasons = buildSeasons(seasons, aired);
+  // Specials (recaps, behind-the-scenes) get one extra "Specials" entry after the last season.
+  const airedSpecials = specials.filter((episode) => isAired(episode, today)).sort((a, b) => a.airdate.localeCompare(b.airdate));
+  if (airedSpecials.length) allSeasons.push({ number: 0, info: null, episodes: airedSpecials });
   let openEpisode = null; // set below, once the season panel exists
   const open = (episode) => openEpisode && openEpisode(episode);
   const watch = createWatchList(show.id, () => refreshWatched());
@@ -545,7 +548,7 @@ function renderShow(show, images, requestedSeason) {
   let start = allSeasons.findIndex((season) => season.number === requestedSeason);
   if (start === -1) {
     start = allSeasons.length - 1;
-    while (start > 0 && allSeasons[start].episodes.length === 0) start -= 1;
+    while (start > 0 && (allSeasons[start].episodes.length === 0 || allSeasons[start].number === 0)) start -= 1;
   }
   container.hidden = false;
   selectSeason(start, false);
@@ -664,6 +667,7 @@ function buildSeasons(seasonList, airedEpisodes) {
 function seasonMeta(season, today) {
   const info = season.info || {};
   const aired = season.episodes.length;
+  if (season.number === 0) return aired + (aired === 1 ? " special" : " specials");
   if (aired === 0) {
     return info.premiereDate && info.premiereDate > today ? "Premieres " + formatDate(info.premiereDate) : "Not aired yet";
   }
@@ -674,6 +678,7 @@ function seasonMeta(season, today) {
 }
 
 function seasonTitle(season) {
+  if (season.number === 0) return "Specials";
   const name = season.info && season.info.name;
   const base = "Season " + season.number;
   return name && name !== base ? base + ": " + name : base;
@@ -695,7 +700,7 @@ function renderSeasonCard(show, season, today) {
     img.loading = "lazy";
     thumb.append(img);
   }
-  if (!own) thumb.append(el("span", "label", "S" + season.number));
+  if (!own) thumb.append(el("span", "label", season.number === 0 ? "SP" : "S" + season.number));
   const progress = el("div", "progress");
   progress.hidden = true;
   progress.append(el("span"));
@@ -738,7 +743,9 @@ function renderSeasonPanel(show, allSeasons, index, today, selectSeason, watch) 
     parts.push(el("p", "empty", "No episodes of this season have aired yet."));
     return parts;
   }
-  const finaleId = finaleEpisodeId(show, season, index === allSeasons.length - 1, today);
+  // Specials sit after the last real season and never carry a finale badge.
+  const lastRegular = allSeasons.reduce((last, item, i) => (item.number === 0 ? last : i), -1);
+  const finaleId = finaleEpisodeId(show, season, index === lastRegular, today);
   const toolbar = el("div", "ep-toolbar");
   const sortButton = el("button", "step");
   sortButton.type = "button";
@@ -753,7 +760,7 @@ function renderSeasonPanel(show, allSeasons, index, today, selectSeason, watch) 
   toolbar.append(watchGroup, sortButton);
   const list = el("ol", "episodes");
 
-  const finaleLabel = show.ended && index === allSeasons.length - 1 ? "Series finale" : "Season finale";
+  const finaleLabel = show.ended && index === lastRegular ? "Series finale" : "Season finale";
   const fillList = () => {
     const ordered = newestFirst ? [...season.episodes].reverse() : season.episodes;
     sortButton.textContent = newestFirst ? "↓ Newest first" : "↑ Oldest first";
@@ -936,12 +943,13 @@ async function loadShow(id, season) {
   document.getElementById("results").replaceChildren();
   try {
     // One request returns the show with its seasons, episodes, cast and next episode.
-    // Images are a separate request and only decorate the header, so a failure there is ignored.
-    const [show, images] = await Promise.all([
+    // Images and specials are separate requests that only add detail, so a failure there is ignored.
+    const [show, images, specials] = await Promise.all([
       getJson("/shows/" + id + "?embed[]=seasons&embed[]=episodes&embed[]=cast&embed[]=nextepisode&embed[]=previousepisode"),
-      getJson("/shows/" + id + "/images").catch(() => [])
+      getJson("/shows/" + id + "/images").catch(() => []),
+      getJson("/shows/" + id + "/episodes?specials=1").then((list) => list.filter((episode) => episode.number === null)).catch(() => [])
     ]);
-    renderShow(show, images, season);
+    renderShow(show, images, season, specials);
     setStatus("");
   } catch (error) {
     setStatus(error.message, true);
