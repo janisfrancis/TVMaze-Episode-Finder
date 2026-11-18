@@ -20,7 +20,6 @@ Built on the free [TVmaze API](https://www.tvmaze.com/api) (no API key needed).
   its next episode and a countdown. Saved in your browser only.
 - **Popular today** on the start page: a row of the most popular series airing today. TVmaze
   has no view counts, so this ranks by its popularity score.
-- **Hide spoilers**: blurs stills and summaries of episodes you have not watched yet.
 - **Main cast** with photos and character names. Click an actor to see every other series they
   appear in, with the roles they play.
 
@@ -85,7 +84,7 @@ Results are cached for 24 hours in a `.tvmaze_cache` folder (ignored by git).
 - "Popular today" merges `GET /schedule?country=US&date=<today>` and `GET /schedule/web?date=<today>`,
   drops talk shows, news and sports, and sorts by each show's `weight`.
 - The start page loads `GET /shows/<id>?embed=nextepisode` for each followed series, one after the other.
-- Watched episodes, followed series, the sort order and the spoiler setting are kept in the browser's `localStorage`.
+- Watched episodes, followed series and the sort order are kept in the browser's `localStorage`.
   They stay on that device and browser.
 - Images are loaded straight from TVmaze's image server, which TVmaze explicitly allows.
 - Data coverage varies: popular shows have images, ratings and summaries for nearly every episode,
