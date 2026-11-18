@@ -79,6 +79,7 @@
     .step:hover:not(:disabled) { border-color: var(--accent); }
     .step.placeholder { visibility: hidden; }
     .season-summary { margin: 12px 0 0; color: var(--muted); }
+    .season-summary.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     .empty { margin: 16px 0 0; color: var(--muted); }
     ol.episodes { list-style: none; margin: 12px 0 0; padding: 0; }
     ol.episodes li { padding: 8px 0; border-top: 1px solid var(--line); }
@@ -272,8 +273,10 @@ function renderResults(matches) {
     const text = el("div");
     text.append(el("div", "name", show.name));
     const year = show.premiered ? show.premiered.slice(0, 4) : "year unknown";
-    const parts = [year, show.status, show.network && show.network.name].filter(Boolean);
+    const parts = [yearRange(show) || year, channelName(show), show.status].filter(Boolean);
     text.append(el("div", "meta", parts.join(" · ")));
+    const extra = [(show.genres || []).join(", "), show.rating && show.rating.average ? "★ " + show.rating.average.toFixed(1) : ""].filter(Boolean);
+    if (extra.length) text.append(el("div", "meta", extra.join(" · ")));
     button.append(text);
 
     button.addEventListener("click", () => { location.hash = "show=" + show.id; });
@@ -547,7 +550,10 @@ function renderShow(show, images, requestedSeason) {
   container.hidden = false;
   selectSeason(start, false);
   requestAnimationFrame(() => {
-    strip.scrollLeft += cards[start].getBoundingClientRect().left - strip.getBoundingClientRect().left - 8;
+    // Centre the chosen season so its neighbours stay visible.
+    const card = cards[start].getBoundingClientRect();
+    const box = strip.getBoundingClientRect();
+    strip.scrollLeft += card.left + card.width / 2 - (box.left + box.width / 2);
   });
 }
 
@@ -722,7 +728,11 @@ function renderSeasonPanel(show, allSeasons, index, today, selectSeason, watch) 
 
   const parts = [nav];
   const summaryText = season.info && plainText(season.info.summary);
-  if (summaryText) parts.push(el("p", "season-summary", summaryText));
+  if (summaryText) {
+    const summary = el("p", "season-summary clamped", summaryText);
+    parts.push(summary);
+    addReadMore(summary);
+  }
 
   if (season.episodes.length === 0) {
     parts.push(el("p", "empty", "No episodes of this season have aired yet."));
